@@ -1,0 +1,298 @@
+﻿<!--
+The Mahāsāṃghika Vinaya, an ancient Indian Buddhist monastic code, divides a single day and night into thirty muhūrtas. Each muhūrta holds twenty layas, and each laya twenty finger-snaps (acchaṭā). Beneath the finger-snap lie still finer measures: the blink (nimeṣa) and the moment (kṣaṇa), a single moment lasting a mere eighteen milliseconds. This work translates that ancient system of reckoning time into the most familiar of forms, the clock face, inviting viewers to sense the subtlety of the Buddhist conception of time as they move between its units and its counting systems.
+
+印度經典《摩訶僧祇律》中將1天分為30個須臾，1個須臾有20個羅豫，1個羅豫裡有20個彈指，彈指之下還有瞬與念。念即剎那，一念僅約十八毫秒。本作品將這套古老的計時法則，轉譯為人們再熟悉不過的鐘面形式，邀請觀眾在不同單位與進位制的轉換之中，體驗佛教微妙的時間觀。
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>kshanaClock</title>
+<style>
+  /* Two faces side by side: Buddhist (top / left) and conventional (bottom / right), rims overlapping like an 8. */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #270e3c;
+  }
+
+  body {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ── five skies, cross-faded by time of day ─────────────────────────── */
+  .sky {
+    position: fixed;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 6s ease-in-out;
+  }
+  .sky.is-on { opacity: 1; }
+  .sky--night     { background: linear-gradient(180deg, #286d8c 0%, #270e3c 100%); } /* 19:00–03:00 */
+  .sky--predawn   { background: linear-gradient(180deg, #270e3c 0%, #3d94b1 100%); } /* 03:00–05:00 */
+  .sky--morning   { background: linear-gradient(180deg, #88c0ff 0%, #fff3c4 100%); } /* 05:00–12:00 */
+  .sky--afternoon { background: linear-gradient(180deg, #fff3c4 0%, #fed7c3 100%); } /* 12:00–17:00 */
+  .sky--dusk      { background: linear-gradient(180deg, #fdd7ca 0%, #4089a9 100%); } /* 17:00–19:00 */
+
+  .clocks {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    overflow: visible;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 1.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .clocks.is-ready { opacity: 1; }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+  <div class="sky sky--night"     data-sky="night"></div>
+  <div class="sky sky--predawn"   data-sky="predawn"></div>
+  <div class="sky sky--morning"   data-sky="morning"></div>
+  <div class="sky sky--afternoon" data-sky="afternoon"></div>
+  <div class="sky sky--dusk"      data-sky="dusk"></div>
+
+  <svg class="clocks" id="clocks" role="img"
+       aria-label="Two clocks: Buddhist time and conventional time, side by side.">
+    <defs>
+      <filter id="shadow-10" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+        <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#000" flood-opacity="0.10"/>
+      </filter>
+      <filter id="shadow-15" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+        <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#000" flood-opacity="0.15"/>
+      </filter>
+    </defs>
+    <g id="clock-b"></g>   <!-- Buddhist: top in portrait, left in landscape -->
+    <g id="clock-c"></g>   <!-- conventional: bottom in portrait, right in landscape -->
+  </svg>
+
+  <p class="sr-only" id="readout" aria-live="off"></p>
+
+<script>
+(() => {
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const DAY = 86_400_000;
+
+  // ── Buddhist units (摩訶僧祇律): 30 須臾 a day, 20 羅豫 a 須臾, 20 彈指 a 羅豫 ──
+  const MUHURTA = DAY / 30;          // 須臾  2 880 000 ms (48 min)
+  const LAYA    = MUHURTA / 20;      // 羅豫    144 000 ms (2 min 24 s)
+  const ACCHATA = LAYA / 20;         // 彈指      7 200 ms
+
+  //   Buddhist:     hour 1 turn a day (30 須臾 per turn) · minute 1 turn per 須臾 · second 1 turn per 羅豫
+  //   Conventional: hour 2 turns a day · minute 1 turn an hour · second 1 turn a minute
+  const anglesB = t => ({ h: t / DAY * 360, m: t / MUHURTA * 360, s: t / LAYA * 360 });
+  const anglesC = t => ({ h: t / DAY * 720, m: t / 3_600_000 * 360, s: t / 60_000 * 360 });
+
+  const R = 180;                         // face radius; the two rims touch, so centres are 2R apart
+  const R_OUT = 170, LEN = 10;           // ticks: 10px in from the rim, 10px long
+  const THIN = 2, BOLD = 6, THIN_OPACITY = 0.5;
+
+  const el = (name, attrs, parent) => {
+    const n = document.createElementNS(SVGNS, name);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  };
+
+  // One face: white 10% fill, 2px inside rim at 30%, ticks, and the three hands.
+  function buildClock(root, ticks, isBold) {
+    el('circle', { r: R, fill: '#fff', 'fill-opacity': 0.1 }, root);
+    el('circle', { r: R - 1, fill: 'none', stroke: '#fff', 'stroke-opacity': 0.3, 'stroke-width': 2 }, root);
+
+    const g = el('g', { fill: '#fff' }, root);
+    for (let k = 0; k < ticks; k++) {
+      const bold = isBold(k), w = bold ? BOLD : THIN;
+      el('rect', {
+        x: -w / 2, y: -R_OUT, width: w, height: LEN,
+        opacity: bold ? 1 : THIN_OPACITY,
+        transform: `rotate(${(360 / ticks) * k})`,
+      }, g);
+    }
+
+    const hour = el('g', { fill: '#fff', filter: 'url(#shadow-10)' }, root);
+    el('rect', { x: -6, y: -93, width: 12, height: 121, rx: 6 }, hour);
+    el('circle', { r: 16 }, hour);
+
+    const minute = el('g', { fill: '#fff', filter: 'url(#shadow-15)' }, root);
+    el('rect', { x: -6, y: -160, width: 12, height: 190, rx: 6 }, minute);
+    el('circle', { r: 10 }, minute);
+
+    const second = el('g', { fill: '#ff4e89' }, root);
+    el('rect', { x: -1, y: -150, width: 2, height: 175, rx: 1 }, second);
+    el('circle', { r: 6 }, second);
+
+    return { hour, minute, second };
+  }
+
+  // Buddhist: 30 須臾 ticks, every 5th bold (5, 10, 15, 20, 25, 30). Conventional: 12, with 3, 6, 9, 12 bold.
+  const handsB = buildClock(document.getElementById('clock-b'), 30, k => k % 5 === 0);
+  const handsC = buildClock(document.getElementById('clock-c'), 12, k => k % 3 === 0);
+
+  // ── second hand colour ─────────────────────────────────────────────
+  // Always a fully saturated sRGB colour (one channel at 255, one at 0), so it never turns
+  // grey or muddy. Hue advances evenly in OKLCH (perceptual) hue: half the wheel per minute,
+  // starting from a random hue when the page loads. Both clocks share it.
+  const pureRGB = h => {                    // HSL(h, 100%, 50%) → [r, g, b] 0–1
+    const k = n => (n + h / 30) % 12;
+    const f = n => 0.5 - 0.5 * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    return [f(0), f(8), f(4)];
+  };
+  const okHue = ([r, g, b]) => {            // sRGB → OKLab hue in degrees
+    const lin = c => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+    const Rl = lin(r), G = lin(g), B = lin(b);
+    const l = Math.cbrt(0.4122214708 * Rl + 0.5363325363 * G + 0.0514459929 * B);
+    const m = Math.cbrt(0.2119034982 * Rl + 0.6806995451 * G + 0.1073969566 * B);
+    const s = Math.cbrt(0.0883024619 * Rl + 0.2817188376 * G + 0.6299787005 * B);
+    const A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    const Bb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    return Math.atan2(Bb, A) * 180 / Math.PI;
+  };
+  const HUE_STEPS = 1440;
+  const okTable = [];
+  for (let i = 0, prev = null; i <= HUE_STEPS; i++) {
+    let v = okHue(pureRGB(i * 360 / HUE_STEPS));
+    if (prev !== null) {
+      while (v < prev - 180) v += 360;      // unwrap the ±180° seam
+      v = Math.max(v, prev);                // flatten a hair-thin reversal near pure blue
+    }
+    okTable.push(v);
+    prev = v;
+  }
+  function pureColourAtOkHue(theta) {
+    const t = okTable[0] + ((((theta - okTable[0]) % 360) + 360) % 360);
+    let lo = 0, hi = HUE_STEPS;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (okTable[mid] <= t) lo = mid; else hi = mid; }
+    const f = (t - okTable[lo]) / ((okTable[hi] - okTable[lo]) || 1);
+    const [r, g, b] = pureRGB(((lo + f) * 360 / HUE_STEPS) % 360);
+    return `rgb(${Math.round(r * 255)} ${Math.round(g * 255)} ${Math.round(b * 255)})`;
+  }
+  const hueStart = Math.random() * 360;
+  const hueStartTime = performance.now();
+  const HUE_PER_MS = 180 / 60_000;          // half the hue wheel per minute
+
+  // ── sky by time of day ──────────────────────────────────────────────
+  const skies = [...document.querySelectorAll('.sky')];
+  function skyFor(h) {
+    if (h >= 19 || h < 3) return 'night';
+    if (h < 5) return 'predawn';
+    if (h < 12) return 'morning';
+    if (h < 17) return 'afternoon';
+    return 'dusk';
+  }
+  // The incoming sky fades in on top of the outgoing one, which stays put until it is covered.
+  let currentSky = null, skyZ = 1, skyTimer = 0;
+  function setSky(name, instant) {
+    if (name === currentSky) return;
+    currentSky = name;
+    const next = skies.find(s => s.dataset.sky === name);
+    clearTimeout(skyTimer);
+    if (instant) {
+      for (const s of skies) {
+        s.style.transition = 'none';
+        s.classList.toggle('is-on', s === next);
+        void s.offsetWidth;
+        s.style.transition = '';
+      }
+      return;
+    }
+    next.style.zIndex = ++skyZ;
+    next.classList.add('is-on');
+    const settle = () => {
+      clearTimeout(skyTimer);
+      next.removeEventListener('transitionend', settle);
+      if (currentSky !== name) return;
+      for (const s of skies) {
+        if (s === next) continue;
+        s.style.transition = 'none';
+        s.classList.remove('is-on');
+        void s.offsetWidth;
+        s.style.transition = '';
+      }
+    };
+    next.addEventListener('transitionend', settle);
+    skyTimer = setTimeout(settle, 9000);
+  }
+
+  // ── main loop ───────────────────────────────────────────────────────
+  const pad = n => String(n).padStart(2, '0');
+  const wrap = a => ((a % 360) + 360) % 360;
+  const msOfDay = d =>
+    ((d.getHours() * 60 + d.getMinutes()) * 60 + d.getSeconds()) * 1000 + d.getMilliseconds();
+  const srReadout = document.getElementById('readout');
+  let lastSecond = -1;
+
+  const turn = (node, deg) => node.setAttribute('transform', `rotate(${wrap(deg).toFixed(3)})`);
+
+  function frame(ts) {
+    const now = new Date();
+    const t = msOfDay(now);
+    const A = anglesB(t), C = anglesC(t);
+
+    turn(handsB.hour, A.h); turn(handsB.minute, A.m); turn(handsB.second, A.s);
+    turn(handsC.hour, C.h); turn(handsC.minute, C.m); turn(handsC.second, C.s);
+
+    const colour = pureColourAtOkHue(hueStart + (ts - hueStartTime) * HUE_PER_MS);
+    handsB.second.setAttribute('fill', colour);
+    handsC.second.setAttribute('fill', colour);
+
+    if (now.getSeconds() !== lastSecond) {
+      lastSecond = now.getSeconds();
+      const b = `${pad(Math.floor(t / MUHURTA))}:${pad(Math.floor(t / LAYA) % 20)}:${pad(Math.floor(t / ACCHATA) % 20)}`;
+      srReadout.textContent = `Buddhist time ${b}; conventional time ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(lastSecond)}`;
+      setSky(skyFor(now.getHours()), false);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // ── layout: stacked when the screen is taller than wide, side by side otherwise ──
+  // The 2px rims overlap exactly, like an 8 or ∞: each face moves 1px toward the other,
+  // so the centres sit 2R − 2 apart. A 4-unit pad keeps the rims from being clipped.
+  const svg = document.getElementById('clocks');
+  const gB = document.getElementById('clock-b');
+  const gC = document.getElementById('clock-c');
+  const PAD = 4;
+  const OFFSET = R - 1;                  // each centre's distance from the middle of the pair
+  function fit() {
+    const W = innerWidth, H = innerHeight;
+    const portrait = H > W;
+    const long = 2 * OFFSET + 2 * R + 2 * PAD, across = 2 * (R + PAD);
+    const boxW = portrait ? across : long;
+    const boxH = portrait ? long : across;
+    svg.setAttribute('viewBox', `${-boxW / 2} ${-boxH / 2} ${boxW} ${boxH}`);
+    gB.setAttribute('transform', portrait ? `translate(0 ${-OFFSET})` : `translate(${-OFFSET} 0)`);
+    gC.setAttribute('transform', portrait ? `translate(0 ${OFFSET})` : `translate(${OFFSET} 0)`);
+
+    // phones keep a 12px margin; larger screens get proportionally more breathing room
+    const short = Math.min(W, H);
+    const margin = 12 + Math.max(0, short - 400) * 0.06;
+    const s = Math.max(0.2, Math.min((W - 2 * margin) / boxW, (H - 2 * margin) / boxH));
+    svg.setAttribute('width', (boxW * s).toFixed(2));
+    svg.setAttribute('height', (boxH * s).toFixed(2));
+  }
+  addEventListener('resize', fit);
+  addEventListener('orientationchange', () => setTimeout(fit, 200));
+  fit();
+
+  setSky(skyFor(new Date().getHours()), true);
+  requestAnimationFrame(ts => {
+    frame(ts);
+    requestAnimationFrame(() => svg.classList.add('is-ready'));
+  });
+})();
+</script>
+</body>
+</html>
